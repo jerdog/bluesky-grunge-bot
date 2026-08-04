@@ -11,6 +11,9 @@ import {
   countUnpositionedSongs,
   dropUnpositionedLines,
   markLinesEmbedded,
+  getCorpusBandNames,
+  getLineIdsForBand,
+  deleteBand,
 } from "./../state";
 import { fetchLines, getJson, FETCH_TTL_SECONDS, type ExtractedLine } from "./fetch";
 import { loadSettings } from "./../settings";
@@ -159,6 +162,53 @@ export async function buildCorpus(
   }
 
   return { bandsProcessed: selected.length, songsFetched, linesInserted };
+}
+
+export interface PruneStats {
+  /** Band names dropped, so the caller can see exactly what went. */
+  bandsRemoved: string[];
+  linesRemoved: number;
+  vectorsRemoved: number;
+}
+
+/**
+ * Bring the corpus back in line with `data/bands.json` by removing bands the file
+ * no longer lists.
+ *
+ * `buildCorpus` only ever adds. Deleting a name from the seed list stops future
+ * harvesting and leaves everything already ingested in place, so the bot keeps
+ * quoting a band you removed — which reads as the edit being ignored.
+ *
+ * Vectorize is the part that actually matters. `matchLyric` builds its candidates
+ * entirely from vector metadata and never reads the line text from D1, so deleting
+ * only the rows would change nothing about replies. Original posts are the mirror
+ * image: `getRandomLyricLines` reads D1 and never touches Vectorize. Both stores
+ * have to go, or the band survives in one half of the bot.
+ *
+ * Order is deliberate: ids come from D1, so the rows are the last thing dropped.
+ * Interrupted midway this leaves rows whose vectors are gone — harmless, and a
+ * re-run finishes the job. The reverse would strand vectors with no way left to
+ * name them.
+ */
+export async function pruneRemovedBands(env: Env, chunkSize = 500): Promise<PruneStats> {
+  const seeded = new Set(bands.map((b) => b.name));
+  const stale = (await getCorpusBandNames(env)).filter((name) => !seeded.has(name));
+
+  const stats: PruneStats = { bandsRemoved: [], linesRemoved: 0, vectorsRemoved: 0 };
+
+  for (const band of stale) {
+    const ids = await getLineIdsForBand(env, band);
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const chunk = ids.slice(i, i + chunkSize);
+      await env.LYRICS_INDEX.deleteByIds(chunk);
+      stats.vectorsRemoved += chunk.length;
+    }
+    await deleteBand(env, band);
+    stats.bandsRemoved.push(band);
+    stats.linesRemoved += ids.length;
+  }
+
+  return stats;
 }
 
 export interface BackfillStats {

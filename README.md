@@ -294,6 +294,7 @@ Manual routes (all require `?key=<MANUAL_TRIGGER_KEY>`):
 | `GET /run/embed` | Embed pending lines into Vectorize |
 | `GET /run/refresh` | Corpus refresh + embed, as the weekly cron runs it |
 | `GET /run/backfill-positions[&limit=]` | Give positions to lines that predate them |
+| `GET /run/prune` | Delete bands `data/bands.json` no longer lists, from D1 and Vectorize |
 | `GET /run/poll` | Poll notifications and reply to mentions |
 | `GET /run/post` | Publish one original post |
 | `POST /api/vote` | `{ id, vote: -1 \| 0 \| 1 }` |
@@ -353,4 +354,17 @@ Tune in `wrangler.jsonc` without code changes:
 - **`LINE_MAX_CHARS`** — longest individual line kept when harvesting. Corpus-build only: changing it does
   nothing until you re-run `seed --force`.
 
-Add or remove bands in `data/bands.json` (metadata only) and re-run `build-corpus`.
+### Changing the band list
+
+`data/bands.json` is the **input** to a corpus build, not a live filter on what the bot may quote.
+
+- **Adding** a band: edit the file, then `./scripts/cf.sh seed` (or `/run/build-corpus` then `/run/embed`).
+- **Removing** a band: edit the file, then **`./scripts/cf.sh prune`**. Building again will not remove
+  anything — `build-corpus` only ever adds, so a band you deleted from the list keeps getting quoted until
+  you prune. `prune` deletes its lines from D1 *and* its vectors from Vectorize, because replies are matched
+  from vector metadata while original posts are drawn from D1; leaving either behind keeps the band alive in
+  half the bot. It also clears that band's fetch-cache stamps, so adding it back re-harvests instead of
+  silently skipping every still-fresh song.
+
+`prune` leaves the `posts` table alone. That's the record of what the bot actually said, and editing it to
+match a config change would be rewriting history.

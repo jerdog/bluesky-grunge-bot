@@ -2,7 +2,15 @@ import { describe, it, expect } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { RECORD_POST_SQL, DOWNVOTED_LINE_IDS_SQL } from "./analytics";
-import { LYRIC_LINE_INSERT_SQL, PASSAGE_CONTEXT_SQL } from "./state";
+import {
+  LYRIC_LINE_INSERT_SQL,
+  PASSAGE_CONTEXT_SQL,
+  DELETE_BAND_LINES_SQL,
+  DELETE_BAND_SONGS_SQL,
+  DELETE_BAND_ROW_SQL,
+  DELETE_BAND_CACHE_SQL,
+  likeLiteral,
+} from "./state";
 
 /**
  * These run the project's real SQL against the real schema.sql in an in-memory
@@ -138,5 +146,42 @@ describe("DOWNVOTED_LINE_IDS_SQL against the real schema", () => {
     ins.run("at://2", "line-down", -1);
     ins.run("at://3", "line-none", 0);
     expect(d.prepare(DOWNVOTED_LINE_IDS_SQL).all()).toEqual([{ line_id: "line-down" }]);
+  });
+});
+
+describe("band-delete SQL against the real schema", () => {
+  /** Two bands, each with a song, a line, and a fetch-cache stamp. */
+  function seedTwoBands(d: ReturnType<typeof db>) {
+    d.exec(`INSERT INTO bands (id, name) VALUES (1, 'Gone'), (2, 'Kept');
+            INSERT INTO songs (id, band_id, title) VALUES (1, 1, 'A'), (2, 2, 'B');
+            INSERT INTO lyric_lines (id, song_id, band_name, song_title, line, char_len, embedded, pos, candidate)
+              VALUES ('g1', 1, 'Gone', 'A', 'a synthetic line', 16, 1, 0, 1),
+                     ('k1', 2, 'Kept', 'B', 'another one here', 16, 1, 0, 1);
+            INSERT INTO fetch_cache (cache_key, status, fetched_at) VALUES
+              ('lrclib:gone:a', 'hit', 1), ('lrclib:kept:b', 'hit', 1);`);
+    return d;
+  }
+
+  it("removes one band's lines, songs, row and cache without touching the other", () => {
+    const d = seedTwoBands(db());
+    d.prepare(DELETE_BAND_LINES_SQL).run("Gone");
+    d.prepare(DELETE_BAND_SONGS_SQL).run("Gone");
+    d.prepare(DELETE_BAND_ROW_SQL).run("Gone");
+    d.prepare(DELETE_BAND_CACHE_SQL).run(likeLiteral("gone"));
+
+    expect(d.prepare("SELECT id FROM lyric_lines").all()).toEqual([{ id: "k1" }]);
+    expect(d.prepare("SELECT name FROM bands").all()).toEqual([{ name: "Kept" }]);
+    expect(d.prepare("SELECT COUNT(*) AS n FROM songs").get()).toEqual({ n: 1 });
+    expect(d.prepare("SELECT cache_key FROM fetch_cache").all()).toEqual([
+      { cache_key: "lrclib:kept:b" },
+    ]);
+  });
+
+  it("does not let a LIKE metacharacter in a band name widen the cache delete", () => {
+    // An unescaped '_' matches any character, so '%:g_ne:%' would also take
+    // 'gone' — a neighbouring band deleted by a name that merely resembles it.
+    const d = seedTwoBands(db());
+    d.prepare(DELETE_BAND_CACHE_SQL).run(likeLiteral("g_ne"));
+    expect(d.prepare("SELECT COUNT(*) AS n FROM fetch_cache").get()).toEqual({ n: 2 });
   });
 });

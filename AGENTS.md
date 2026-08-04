@@ -136,7 +136,7 @@ pathology, slightly cheaper).
 | `src/lyrics/corpus.ts` | `buildCorpus`, `backfillPositions`, `embedPending`, `lineId` |
 | `migrations/*.sql` | Schema changes for deployed databases; tracked in a ledger (see its README) |
 | `src/state.ts` | KV session/cursor/dedupe + corpus-table D1 helpers |
-| `data/bands.json` | Curated 1990s grunge band list (names only) |
+| `data/bands.json` | Curated 1990s grunge band list (names only). Seed **input**, not a live filter — removing a name needs `/run/prune`, since `buildCorpus` only ever adds |
 | `scripts/cf.sh` | Account-pinned wrangler wrapper (provision / schema / migrate / secrets / deploy / seed / backfill) |
 
 ## Test map

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { backfillPositions, lineId } from "./corpus";
+import { backfillPositions, lineId, pruneRemovedBands } from "./corpus";
 import type { Env } from "./../env";
 
 describe("lineId", () => {
@@ -119,5 +119,96 @@ describe("backfillPositions", () => {
     const { env } = makeEnv({ songs: [] });
     const stats = await backfillPositions(env, 1_700_000_000);
     expect(stats).toMatchObject({ songsProcessed: 0, linesPositioned: 0, remainingSongs: 0 });
+  });
+});
+
+describe("pruneRemovedBands", () => {
+  /**
+   * `data/bands.json` is the real seed list, so a band that is genuinely in it
+   * ("Nirvana") must survive and one that never was ("Deleted Band") must go.
+   * Asserting against the real file keeps the test honest about what the list
+   * means, rather than proving a stub filters a stub.
+   */
+  function makeEnv(corpus: Record<string, string[]>) {
+    const sqls: string[] = [];
+    const deletedVectors: string[][] = [];
+    let band = "";
+
+    const prepare = vi.fn((sql: string) => {
+      sqls.push(sql);
+      const stmt = () => ({
+        bind: (...next: unknown[]) => {
+          if (sql.includes("SELECT id FROM lyric_lines")) band = next[0] as string;
+          return stmt();
+        },
+        all: async () => ({
+          results: sql.includes("DISTINCT band_name")
+            ? Object.keys(corpus).map((b) => ({ band_name: b }))
+            : (corpus[band] ?? []).map((id) => ({ id })),
+        }),
+        first: async () => null,
+        run: async () => ({ meta: { changes: 0 } }),
+      });
+      return stmt();
+    });
+
+    const env = {
+      DB: { prepare, batch: async () => [] },
+      LYRICS_INDEX: { deleteByIds: vi.fn(async (ids: string[]) => deletedVectors.push(ids)) },
+    } as unknown as Env;
+    return { env, sqls, deletedVectors };
+  }
+
+  it("removes only the bands the seed list no longer names", async () => {
+    const { env, deletedVectors } = makeEnv({
+      Nirvana: ["keep1", "keep2"],
+      "Deleted Band": ["gone1", "gone2"],
+    });
+
+    const stats = await pruneRemovedBands(env);
+
+    expect(stats.bandsRemoved).toEqual(["Deleted Band"]);
+    expect(stats.linesRemoved).toBe(2);
+    expect(deletedVectors.flat()).toEqual(["gone1", "gone2"]);
+  });
+
+  /**
+   * The whole point of the action. matchLyric reads band/song/line from vector
+   * metadata and never from D1, so a prune that only deleted rows would leave
+   * replies quoting the removed band exactly as before.
+   */
+  it("deletes the vectors, not just the rows", async () => {
+    const { env, deletedVectors, sqls } = makeEnv({ "Deleted Band": ["v1"] });
+    await pruneRemovedBands(env);
+
+    expect(deletedVectors).toEqual([["v1"]]);
+    expect(sqls.some((s) => s.includes("DELETE FROM lyric_lines"))).toBe(true);
+  });
+
+  it("clears the fetch cache too, so re-adding the band re-ingests it", async () => {
+    // Without this, buildCorpus skips every still-fresh cache key and a re-added
+    // band quietly harvests nothing until the 30-day TTL lapses.
+    const { env, sqls } = makeEnv({ "Deleted Band": ["v1"] });
+    await pruneRemovedBands(env);
+
+    expect(sqls.some((s) => s.includes("DELETE FROM fetch_cache"))).toBe(true);
+  });
+
+  it("chunks large deletes rather than sending one unbounded call", async () => {
+    const ids = Array.from({ length: 1250 }, (_, i) => `id${i}`);
+    const { env, deletedVectors } = makeEnv({ "Deleted Band": ids });
+
+    const stats = await pruneRemovedBands(env, 500);
+
+    expect(deletedVectors.map((c) => c.length)).toEqual([500, 500, 250]);
+    expect(stats.vectorsRemoved).toBe(1250);
+  });
+
+  it("does nothing when the corpus already matches the seed list", async () => {
+    const { env, deletedVectors } = makeEnv({ Nirvana: ["a"], "Pearl Jam": ["b"] });
+    const stats = await pruneRemovedBands(env);
+
+    expect(stats).toEqual({ bandsRemoved: [], linesRemoved: 0, vectorsRemoved: 0 });
+    expect(deletedVectors).toEqual([]);
   });
 });

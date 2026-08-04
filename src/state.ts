@@ -240,6 +240,60 @@ export function dropUnpositionedLines(
     .bind(songId, JSON.stringify(keepIds));
 }
 
+/**
+ * Every band the corpus actually holds lines for — which is not the same set as
+ * `data/bands.json`. That file is the *input* to a corpus build; removing a name
+ * from it stops future harvesting and does nothing to what was already ingested.
+ */
+export async function getCorpusBandNames(env: Env): Promise<string[]> {
+  const res = await env.DB.prepare(`SELECT DISTINCT band_name FROM lyric_lines`).all<{
+    band_name: string;
+  }>();
+  return (res.results ?? []).map((r) => r.band_name);
+}
+
+/** A band's line ids, which are also its Vectorize vector ids. */
+export async function getLineIdsForBand(env: Env, band: string): Promise<string[]> {
+  const res = await env.DB.prepare(`SELECT id FROM lyric_lines WHERE band_name = ?`)
+    .bind(band)
+    .all<{ id: string }>();
+  return (res.results ?? []).map((r) => r.id);
+}
+
+/**
+ * Erase a band from D1: its lines, its songs, its `bands` row, and its fetch-cache
+ * stamps.
+ *
+ * The cache stamps matter as much as the rows. `buildCorpus` skips any song whose
+ * key is still fresh, so a band deleted but left cached would silently re-ingest
+ * *nothing* if it were added back inside the 30-day TTL — the confusing inverse of
+ * the bug this function exists to fix.
+ *
+ * `posts` deliberately keeps its rows. It is the analytics record of what the bot
+ * actually said, and rewriting history to match a config change would be a lie.
+ */
+export const DELETE_BAND_LINES_SQL = `DELETE FROM lyric_lines WHERE band_name = ?`;
+export const DELETE_BAND_SONGS_SQL = `DELETE FROM songs WHERE band_id IN (SELECT id FROM bands WHERE name = ?)`;
+export const DELETE_BAND_ROW_SQL = `DELETE FROM bands WHERE name = ?`;
+/**
+ * Cache keys are `source:artist:title`, all lower-cased, so the band is the
+ * middle segment. Anchoring on both colons keeps a band name from matching a
+ * song title that happens to contain it.
+ */
+export const DELETE_BAND_CACHE_SQL = `DELETE FROM fetch_cache WHERE cache_key LIKE '%:' || ? || ':%' ESCAPE '\\'`;
+
+/** Escape LIKE metacharacters, which a band name would otherwise smuggle in. */
+export const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+export async function deleteBand(env: Env, band: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(DELETE_BAND_LINES_SQL).bind(band),
+    env.DB.prepare(DELETE_BAND_SONGS_SQL).bind(band),
+    env.DB.prepare(DELETE_BAND_ROW_SQL).bind(band),
+    env.DB.prepare(DELETE_BAND_CACHE_SQL).bind(likeLiteral(band.toLowerCase())),
+  ]);
+}
+
 export interface PassageContext {
   /** Position of the matched line itself, or null if this row predates ordering. */
   matchPos: number | null;

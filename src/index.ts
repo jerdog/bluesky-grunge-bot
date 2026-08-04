@@ -1,7 +1,7 @@
 import { botHandle, isDryRun, nowSeconds, type Env } from "./env";
 import { handleMentions, replyToPost } from "./replies";
 import { publishOriginal } from "./originalPost";
-import { backfillPositions, buildCorpus, embedPending } from "./lyrics/corpus";
+import { backfillPositions, buildCorpus, embedPending, pruneRemovedBands } from "./lyrics/corpus";
 import { countLyricLines } from "./state";
 import { bskyUrl, resolvePostTarget } from "./bluesky";
 import { loadSettings } from "./settings";
@@ -70,6 +70,12 @@ const ACTIONS = {
       }),
   },
   embed: { run: async (env) => ({ embedded: await embedPending(env) }) },
+  // Deletes bands no longer in data/bands.json from D1 *and* Vectorize. Manual
+  // only, and deliberately not part of `refresh`: it is the one destructive
+  // action here, and a weekly cron that silently drops a band because an edit
+  // was mid-flight is not a trade worth making. Run it after editing the seed
+  // list; `build-corpus` alone will not remove anything.
+  prune: { run: (env) => pruneRemovedBands(env) },
   // Repairs lines harvested before positions existed; re-run while remainingSongs > 0.
   "backfill-positions": {
     run: (env, url) => backfillPositions(env, nowSeconds(), { limit: intParam(url, "limit") }),

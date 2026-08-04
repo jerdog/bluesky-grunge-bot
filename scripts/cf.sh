@@ -571,6 +571,27 @@ cmd_backfill() {
   done
 }
 
+# prune [URL]
+#
+# Deletes bands no longer listed in data/bands.json from D1 and Vectorize.
+# `build-corpus` only ever adds, so editing the seed list has no effect on what
+# was already ingested — the bot keeps quoting a band you removed until this runs.
+cmd_prune() {
+  banner
+  local host="${1:-}" key out
+  host="$(resolve_host "$host")"
+  key="$(require_key)"
+  confirm "Delete every band in the corpus that data/bands.json no longer lists?"
+  out="$(call_route "$host/run/prune?key=$key" "prune")"
+  printf '%s\n' "$out" | node_json '
+    const r = o.result ?? {};
+    const names = r.bandsRemoved ?? [];
+    console.log(names.length ? "  removed: " + names.join(", ") : "  nothing to remove");
+    console.log("  " + (r.linesRemoved ?? 0) + " line(s), " + (r.vectorsRemoved ?? 0) + " vector(s)");
+  ' || printf '%s\n' "$out"
+  ok "prune complete"
+}
+
 cmd_tail() { banner; wr tail "$@"; }
 
 cmd_run() { banner; wr "$@"; }
@@ -594,6 +615,8 @@ ${B}Commands${RST}
   backfill [URL] [songsPerBatch]
               Give positions to lines that predate them, so they can be quoted as
               passages. Loops until done. Check % passage-ready on the dashboard.
+  prune [URL] Delete bands data/bands.json no longer lists, from D1 AND Vectorize.
+              Run after removing a band — seeding again will not remove anything.
   tail        Stream live logs
   run ...     Any other wrangler command, with this account pinned
   help        This message
