@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { backfillPositions, lineId, pruneRemovedBands } from "./corpus";
+import {
+  backfillPositions,
+  lineId,
+  pruneRemovedBands,
+  VECTORIZE_DELETE_MAX_IDS,
+} from "./corpus";
 import type { Env } from "./../env";
 
 describe("lineId", () => {
@@ -202,6 +207,29 @@ describe("pruneRemovedBands", () => {
 
     expect(deletedVectors.map((c) => c.length)).toEqual([500, 500, 250]);
     expect(stats.vectorsRemoved).toBe(1250);
+  });
+
+  /**
+   * The chunk size is a service limit, not a preference. Vectorize rejects a
+   * `deleteByIds` payload over 100 ids outright — `VECTOR_DELETE_ERROR
+   * (code = 40007)` — and it fails the whole call rather than truncating. The
+   * first version of this action chunked at 500 on the assumption the cap was
+   * 1000, so every prune of a band with 100+ lines 500'd. Assert the default
+   * against the limit itself, so raising one without the other cannot pass.
+   */
+  it("never sends more ids per call than Vectorize accepts", async () => {
+    expect(VECTORIZE_DELETE_MAX_IDS).toBeLessThanOrEqual(100);
+
+    const ids = Array.from({ length: 116 }, (_, i) => `id${i}`);
+    const { env, deletedVectors } = makeEnv({ "Deleted Band": ids });
+
+    // No explicit chunk size — this is exactly what /run/prune calls.
+    const stats = await pruneRemovedBands(env);
+
+    expect(Math.max(...deletedVectors.map((c) => c.length))).toBeLessThanOrEqual(
+      VECTORIZE_DELETE_MAX_IDS,
+    );
+    expect(stats.vectorsRemoved).toBe(116);
   });
 
   it("does nothing when the corpus already matches the seed list", async () => {

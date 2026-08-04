@@ -172,6 +172,16 @@ export interface PruneStats {
 }
 
 /**
+ * Vectorize's hard cap on ids per `deleteByIds` call. Exceeding it fails the whole
+ * call — `VECTOR_DELETE_ERROR (code = 40007): too many ids in payload` — rather
+ * than truncating, so this is a real limit and not a tuning knob. A band with more
+ * lines than this is ordinary, so the chunking is the normal path, not an edge
+ * case. It is deliberately NOT the embed chunk size (100 by coincidence today):
+ * they answer to different services and must be free to diverge.
+ */
+export const VECTORIZE_DELETE_MAX_IDS = 100;
+
+/**
  * Bring the corpus back in line with `data/bands.json` by removing bands the file
  * no longer lists.
  *
@@ -190,7 +200,10 @@ export interface PruneStats {
  * re-run finishes the job. The reverse would strand vectors with no way left to
  * name them.
  */
-export async function pruneRemovedBands(env: Env, chunkSize = 500): Promise<PruneStats> {
+export async function pruneRemovedBands(
+  env: Env,
+  chunkSize = VECTORIZE_DELETE_MAX_IDS,
+): Promise<PruneStats> {
   const seeded = new Set(bands.map((b) => b.name));
   const stale = (await getCorpusBandNames(env)).filter((name) => !seeded.has(name));
 
