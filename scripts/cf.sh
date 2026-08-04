@@ -438,8 +438,17 @@ ensure_deps() {
   fi
 }
 
+# True only if a placeholder survives in a *value*. Comment lines are dropped
+# first: the comment documenting the REPLACE_WITH_* convention contains the token
+# it documents, so a plain grep matched the documentation and blocked every deploy
+# even after provision had filled every id in. Only whole-line comments are
+# stripped, so a `//` inside a string value can't be mistaken for one.
+has_config_placeholder() {
+  grep -vE '^[[:space:]]*//' "$WRANGLER_CONFIG" | grep -q "REPLACE_WITH"
+}
+
 cmd_deploy() {
-  grep -q "REPLACE_WITH" "$WRANGLER_CONFIG" &&
+  has_config_placeholder &&
     die "$WRANGLER_CONFIG still has REPLACE_WITH_* placeholders — run: $0 provision"
 
   assert_kv_binding
