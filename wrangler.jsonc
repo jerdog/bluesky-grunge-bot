@@ -1,0 +1,82 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bluesky-grunge-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true
+    }
+  },
+
+  // Scheduled flows. Routed by event.cron in src/index.ts.
+  "triggers": {
+    "crons": [
+      "*/3 * * * *",   // notification poll: reply to new @mentions
+      "0 15 * * *",     // original post, late morning US (15:00 UTC)
+      "0 21 * * *",     // original post, mid-afternoon US (21:00 UTC)
+      "0 4 * * 1"       // weekly corpus refresh (Mondays 04:00 UTC)
+    ]
+  },
+
+  "vars": {
+    // DRY_RUN: anything other than the exact string "false" means compose+log but
+    // do NOT send. Set to "false" here, so the bot posts for real.
+    "DRY_RUN": "false",
+    // Workers AI model ids (overridable without code changes).
+    "AI_TEXT_MODEL": "@cf/google/gemma-4-26b-a4b-it",
+    "AI_EMBED_MODEL": "@cf/qwen/qwen3-embedding-0.6b",
+    // Cross-encoder that re-scores Vectorize candidates before the LLM picks.
+    "AI_RERANK_MODEL": "@cf/baai/bge-reranker-base",
+    // Vectorize recall width. Wider is fine — the reranker narrows it cheaply.
+    "MATCH_TOP_K": "25",
+    // How many reranked candidates get handed to the LLM for the final pick.
+    "RERANK_TOP_N": "4",
+    // Max grapheme length of the whole quote in a post, attribution excluded
+    // (kept well under the platform limit for copyright safety).
+    "SNIPPET_MAX_CHARS": "260",
+    // Max lines a quote may span. The matched line plus the ones leading up to it,
+    // as long as they're adjacent in the song. Set to 1 for single-line quotes.
+    "PASSAGE_MAX_LINES": "8",
+    // Longest individual line kept when harvesting lyrics. Corpus-build only —
+    // changing it does nothing until the corpus is rebuilt.
+    "LINE_MAX_CHARS": "150"
+  },
+
+  "ai": { "binding": "AI" },
+
+  "vectorize": [
+    {
+      "binding": "LYRICS_INDEX",
+      "index_name": "grunge-lyrics"
+    }
+  ],
+
+  // The two ids below are placeholders until `./scripts/cf.sh provision` creates
+  // the resources in your account and patches the real ones in. Commit those —
+  // they identify resources, they are not secrets.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bluesky_grunge_bot",
+      "database_id": "set-by-cf.sh-provision"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "STATE",
+      "id": "set-by-cf.sh-provision"
+    }
+  ]
+
+  // Secrets (set via `wrangler secret put`), NOT stored here:
+  //   BLUESKY_HANDLE
+  //   BLUESKY_APP_PASSWORD
+  //   MANUAL_TRIGGER_KEY   (guards the manual HTTP routes)
+}

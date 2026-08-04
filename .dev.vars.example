@@ -1,0 +1,58 @@
+# Copy to `.dev.vars` and fill in. Never commit real values.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# This one file covers both halves of the project:
+#
+#   * Worker secrets      — loaded by `wrangler dev` as runtime bindings, and set
+#                           in production with `./scripts/cf.sh secrets`.
+#   * Deploy credentials  — read by ./scripts/cf.sh to pin which Cloudflare
+#                           account every wrangler command targets.
+#
+# Note: `wrangler dev` injects everything here into the Worker's `env`, so the
+# CLOUDFLARE_* values are visible to local dev code. They are NOT present in
+# production — deployed secrets come only from `wrangler secret put`.
+
+# ---------------------------------------------------------------------------
+# Worker secrets
+# ---------------------------------------------------------------------------
+
+# The bot's Bluesky account, and an App Password (NOT the account password).
+# Generate at: Settings -> Privacy and Security -> App Passwords
+BLUESKY_HANDLE="your-bot.bsky.social"
+BLUESKY_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+
+# Shared secret guarding the dashboard and the manual /run/* routes (?key=...).
+# Also used by `./scripts/cf.sh seed` to call those routes.
+MANUAL_TRIGGER_KEY="choose-a-long-random-string"
+
+# ---------------------------------------------------------------------------
+# Cloudflare deploy credentials
+# ---------------------------------------------------------------------------
+#
+# Setting a token is what pins the account: with several Cloudflare accounts a
+# cached `wrangler login` session is ambiguous, and a deploy can land in the wrong
+# one. ./scripts/cf.sh exports these and verifies them before anything mutating.
+#
+# For more than one account, keep a file per account and select it with -p:
+#   cp .dev.vars.example .dev.vars.personal
+#   ./scripts/cf.sh -p personal deploy
+
+# Find it on any domain's Overview page in the dashboard, or list what a token
+# can see:
+#   curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+#     https://api.cloudflare.com/client/v4/accounts
+CLOUDFLARE_ACCOUNT_ID="your-cloudflare-account-id"
+
+# Create at https://dash.cloudflare.com/profile/api-tokens with these
+# permissions on the target account:
+#   Account · Workers Scripts    · Edit
+#   Account · Workers KV Storage · Edit
+#   Account · D1                 · Edit
+#   Account · Vectorize          · Edit
+#   Account · Workers AI         · Read
+#
+# May also be a 1Password reference, resolved with `op read` at runtime so no
+# token sits on disk:
+#   CLOUDFLARE_API_TOKEN="op://Private/Cloudflare grunge/credential"
+CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"

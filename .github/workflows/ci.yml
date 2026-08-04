@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Nothing here touches Cloudflare or Bluesky: no secrets are needed, and none
+# should be added. Deploys stay a local operation through ./scripts/cf.sh, which
+# pins the target account interactively.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.x for `node:sqlite`, which schema.test.ts uses to run the real SQL
+          # against the real schema.sql.
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Bash + real SQLite via a Python fake-wrangler shim. Catches migrations
+      # that are valid bash but invalid SQL — the vitest suite mocks D1 and
+      # cannot see those.
+      - run: npm run test:migrations

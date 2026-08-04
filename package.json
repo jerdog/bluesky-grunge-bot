@@ -1,0 +1,30 @@
+{
+  "name": "bluesky-grunge-bot",
+  "version": "0.1.0",
+  "description": "A Bluesky bot on Cloudflare Workers that replies with contextually-fitting 1990s grunge lyric snippets and posts on a schedule.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "./scripts/cf.sh deploy",
+    "test": "vitest run",
+    "test:migrations": "./scripts/test-migrations.sh",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:apply": "./scripts/cf.sh schema",
+    "cf": "./scripts/cf.sh",
+    "provision": "./scripts/cf.sh provision",
+    "secrets": "./scripts/cf.sh secrets",
+    "tail": "./scripts/cf.sh tail"
+  },
+  "dependencies": {
+    "@atproto/api": "latest"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5",
+    "@types/node": "^26.1.1",
+    "typescript": "^6",
+    "vitest": "^4",
+    "wrangler": "^4"
+  }
+}
