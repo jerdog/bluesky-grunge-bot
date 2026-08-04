@@ -23,7 +23,9 @@ describe("pruneRemovedBands against real SQLite", () => {
   it("removes the stale band without violating a foreign key", async () => {
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON;");
-    db.exec(readFileSync("/home/user/bluesky-grunge-bot/schema.sql", "utf8"));
+    // Repo-relative, exactly as schema.test.ts reads it — vitest runs from the
+    // repo root. An absolute path passes only on the machine that wrote it.
+    db.exec(readFileSync("schema.sql", "utf8"));
     db.exec(`
       INSERT INTO bands (id, name) VALUES (1, 'Deleted Band'), (2, 'Nirvana');
       INSERT INTO songs (id, band_id, title) VALUES (1, 1, 'A'), (2, 2, 'B');
