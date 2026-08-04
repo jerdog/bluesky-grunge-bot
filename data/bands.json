@@ -56,12 +56,6 @@
     { "name": "Buffalo Tom", "seedTracks": [] },
     { "name": "Fuel", "seedTracks": [] },
     { "name": "Tripping Daisy", "seedTracks": [] },
-    { "name": "Superdrag", "seedTracks": [] },
-    { "name": "Marcy Playground", "seedTracks": [] },
-    { "name": "Cracker", "seedTracks": [] },
-    { "name": "Better Than Ezra", "seedTracks": [] },
-    { "name": "Gin Blossoms", "seedTracks": [] },
-    { "name": "Creed", "seedTracks": [] },
-    { "name": "Staind", "seedTracks": [] }
+    { "name": "Superdrag", "seedTracks": [] }
   ]
 }
