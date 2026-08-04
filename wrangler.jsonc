@@ -61,9 +61,9 @@
 			"remote": true
 		}
 	],
-	// The two ids below are placeholders until `./scripts/cf.sh provision` creates
-	// the resources in your account and patches the real ones in. Commit those —
-	// they identify resources, they are not secrets.
+	// `./scripts/cf.sh provision` creates these resources in your account and
+	// patches the ids in, replacing any REPLACE_WITH_* placeholder. Commit the
+	// result — they identify resources, they are not secrets.
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -71,10 +71,13 @@
 			"database_id": "381f40c0-3715-4785-a1c5-9cb071f5ddfb"
 		}
 	],
+	// Must be THIS Worker's namespace ("bluesky-grunge-bot-STATE"). KV holds the
+	// cached Bluesky session, so pointing at another bot's namespace makes this
+	// bot post under that bot's handle. `cf.sh deploy` now refuses if it does.
 	"kv_namespaces": [
 		{
 			"binding": "STATE",
-			"id": "c035ea90f428457e8f4849332ffc6d6b"
+			"id": "REPLACE_WITH_KV_ID"
 		}
 	]
 	// Secrets (set via `wrangler secret put`), NOT stored here:

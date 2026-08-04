@@ -24,7 +24,15 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      # `npm install`, not `npm ci`, on purpose. `npm ci` aborts unless the
+      # lockfile matches package.json exactly, and a lockfile regenerated on
+      # macOS legitimately differs from what a linux runner resolves — npm omits
+      # optional deps that don't apply to the host platform (that is exactly how
+      # @emnapi/* went missing and red-lit a run that had no real problem).
+      # Failing CI on that tells us nothing about the code. `install` still
+      # honours the lockfile when it is in sync, and this matches what
+      # `cf.sh deploy` runs locally, so CI and deploy resolve deps identically.
+      - run: npm install --no-audit --no-fund
 
       - run: npm run typecheck
 

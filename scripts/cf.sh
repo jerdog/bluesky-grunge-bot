@@ -170,12 +170,64 @@ cmd_whoami() {
   wr vectorize list 2>/dev/null | sed 's/^/  vectorize  /' || true
 }
 
+# The Worker's name, read out of the JSONC config the same way patch_config writes
+# it — `"name"` is the first such key in the file, and neither `"index_name"` nor
+# `"database_name"` contains the quoted literal, so the match can't wander.
+worker_name() {
+  node -e '
+    const fs=require("fs");
+    const m=fs.readFileSync(process.argv[1],"utf8").match(/"name"\s*:\s*"([^"]*)"/);
+    if(!m){ console.error("no \"name\" field in "+process.argv[1]); process.exit(1); }
+    process.stdout.write(m[1]);
+  ' "$WRANGLER_CONFIG"
+}
+
 # Look up a resource id by name from wrangler's JSON listings, so we never parse
 # the (less stable) output of the `create` commands.
+#
+# KV namespaces are titled "<worker-name>-<binding>", and the match here must be
+# exact. Matching the binding as a *suffix* looked fine with one bot in the
+# account and silently broke with two: every bot's namespace ends in "-STATE", so
+# `.find` returned whichever came back first. That put another bot's namespace id
+# into this Worker's config — and because the cached Bluesky session lives in KV,
+# this Worker resumed that bot's session and posted under its handle, ignoring
+# BLUESKY_HANDLE entirely (login is only reached when no valid session is cached).
 kv_id_for() { wr kv namespace list 2>/dev/null |
-  node_json 'const m=o.find(n=>n.title.endsWith(process.argv[1])); process.stdout.write(m?m.id:"");' "$1"; }
+  node_json 'const m=o.find(n=>n.title===process.argv[1]); process.stdout.write(m?m.id:"");' \
+    "$(worker_name)-$1"; }
 d1_id_for() { wr d1 list --json 2>/dev/null |
   node_json 'const m=o.find(d=>d.name===process.argv[1]); process.stdout.write(m?m.uuid:"");' "$1"; }
+
+# Guard the failure above: confirm the id currently in the config really is this
+# Worker's namespace. Cheap, and the alternative is discovering it from a public
+# post made under the wrong account.
+assert_kv_binding() {
+  local want configured listing actual
+  want="$(worker_name)-$KV_BINDING"
+  configured="$(node -e '
+    const fs=require("fs");
+    const m=fs.readFileSync(process.argv[1],"utf8").match(/"id"\s*:\s*"([^"]*)"/);
+    process.stdout.write(m?m[1]:"");
+  ' "$WRANGLER_CONFIG")"
+  [[ -n "$configured" ]] || die "no KV id in $WRANGLER_CONFIG — run: $0 provision"
+
+  # Fetch once, so "the listing failed" and "the id isn't in the listing" stay
+  # distinguishable. Collapsing them is what let a wrong id look acceptable.
+  listing="$(wr kv namespace list 2>/dev/null)" || listing=""
+  if [[ -z "$listing" ]]; then
+    warn "could not list KV namespaces — skipping the binding check"
+    return 0
+  fi
+
+  actual="$(printf '%s' "$listing" |
+    node_json 'const m=o.find(n=>n.id===process.argv[1]); process.stdout.write(m?m.title:"");' \
+      "$configured")"
+
+  [[ "$actual" == "$want" ]] || die \
+    "KV namespace mismatch: $WRANGLER_CONFIG points at ${actual:-an id this account does not have} ($configured), not '$want'.
+  KV holds the cached Bluesky session, so deploying this would make the bot post
+  under whichever account owns that namespace. Fix it with: $0 provision"
+}
 
 # Patch an id into wrangler.jsonc by targeted replacement — the file is JSONC
 # with comments, so a JSON parse/stringify round trip would strip them.
@@ -347,6 +399,7 @@ cmd_deploy() {
   grep -q "REPLACE_WITH" "$WRANGLER_CONFIG" &&
     die "$WRANGLER_CONFIG still has REPLACE_WITH_* placeholders — run: $0 provision"
 
+  assert_kv_binding
   ensure_deps
   info "typecheck";  npm run --silent typecheck
   info "tests";      npm test --silent
