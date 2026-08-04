@@ -528,6 +528,12 @@ call_route() {
   body="${out%$'\n'*}"
   printf '%s\n' "$body"
 
+  # On failure the body carries the Worker's own error text — `/run/*` answers
+  # {ok:false, error} — and callers that capture stdout (cmd_seed, cmd_backfill,
+  # cmd_prune) swallow it, so `die` fired with the diagnosis invisible. Repeat it
+  # on stderr, which no caller captures.
+  [[ "$code" == 2* ]] || printf '%s\n' "$body" >&2
+
   case "$code" in
     2*) return 0 ;;
     401) die "$label: HTTP 401 — the Worker rejected MANUAL_TRIGGER_KEY.
