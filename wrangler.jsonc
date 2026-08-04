@@ -26,8 +26,8 @@
 	},
 	"vars": {
 		// DRY_RUN: anything other than the exact string "false" means compose+log but
-		// do NOT send. Currently "true" — nothing reaches Bluesky. Set it to "false"
-		// to go live.
+		// do NOT send. Deliberately not restated here in prose — a comment naming
+		// the current value goes stale the first time the value is flipped.
 		"DRY_RUN": "false",
 		// Workers AI model ids (overridable without code changes).
 		"AI_TEXT_MODEL": "@cf/google/gemma-4-26b-a4b-it",
