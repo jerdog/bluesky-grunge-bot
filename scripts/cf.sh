@@ -251,10 +251,21 @@ cmd_provision() {
   banner
   confirm "Create KV / D1 / Vectorize resources in ${ACCOUNT_LABEL}?"
 
-  info "KV namespace ($KV_BINDING)"
+  info "KV namespace ($(worker_name)-$KV_BINDING)"
   wr kv namespace create "$KV_BINDING" >/dev/null 2>&1 || true
   local kv_id; kv_id="$(kv_id_for "$KV_BINDING")"
-  [[ -n "$kv_id" ]] || die "could not find the KV namespace after creating it"
+  if [[ -z "$kv_id" ]]; then
+    # Show what the account actually has. "could not find it" with no listing
+    # sent the last debugging session guessing at titles it could have printed.
+    printf 'KV namespaces in this account:\n' >&2
+    wr kv namespace list 2>/dev/null |
+      node_json 'for (const n of o) console.error("  " + n.title + "  " + n.id);' || true
+    die "no KV namespace titled '$(worker_name)-$KV_BINDING'.
+  Wrangler titles them <worker-name>-<binding>. Create one with that exact title,
+  and do NOT point this Worker at a namespace listed above under another name — KV
+  holds the cached Bluesky session, so this bot would post under that bot's handle."
+  fi
+  echo "  $(worker_name)-$KV_BINDING -> $kv_id"
   patch_config "id" "$kv_id"
 
   info "D1 database ($D1_NAME)"
