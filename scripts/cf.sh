@@ -182,33 +182,42 @@ worker_name() {
   ' "$WRANGLER_CONFIG"
 }
 
-# Look up a resource id by name from wrangler's JSON listings, so we never parse
-# the (less stable) output of the `create` commands.
+# The namespace TITLE this Worker owns, which is not the same thing as the binding
+# name. `wrangler kv namespace create <arg>` titles the namespace literally `<arg>`
+# — v4 adds no worker-name prefix (`title = ${env}${namespace}${preview}`). So
+# creating it as the bare binding, "STATE", gives every bot in the account a
+# namespace with the SAME title: the second bot's create silently fails as a
+# duplicate and any lookup by that title returns the first bot's namespace.
 #
-# KV namespaces are titled "<worker-name>-<binding>", and the match here must be
-# exact. Matching the binding as a *suffix* looked fine with one bot in the
-# account and silently broke with two: every bot's namespace ends in "-STATE", so
-# `.find` returned whichever came back first. That put another bot's namespace id
-# into this Worker's config — and because the cached Bluesky session lives in KV,
-# this Worker resumed that bot's session and posted under its handle, ignoring
-# BLUESKY_HANDLE entirely (login is only reached when no valid session is cached).
-kv_id_for() { wr kv namespace list 2>/dev/null |
-  node_json 'const m=o.find(n=>n.title===process.argv[1]); process.stdout.write(m?m.id:"");' \
-    "$(worker_name)-$1"; }
+# That is what happened here. KV caches the Bluesky session, so this Worker
+# resumed the other bot's session and posted under its handle — with correct
+# secrets and no error, because BLUESKY_HANDLE is only read when no cached session
+# is valid. Qualifying the title with the Worker name is what makes it unique.
+kv_title() { printf '%s-%s' "$(worker_name)" "$KV_BINDING"; }
+
+# Look up a resource id by name from wrangler's JSON listings, so we never parse
+# the (less stable) output of the `create` commands. Exact match, never a suffix:
+# "<worker>-STATE" and a legacy bare "STATE" must stay distinguishable.
+kv_id_by_title() { wr kv namespace list 2>/dev/null |
+  node_json 'const m=o.find(n=>n.title===process.argv[1]); process.stdout.write(m?m.id:"");' "$1"; }
 d1_id_for() { wr d1 list --json 2>/dev/null |
   node_json 'const m=o.find(d=>d.name===process.argv[1]); process.stdout.write(m?m.uuid:"");' "$1"; }
 
 # Guard the failure above: confirm the id currently in the config really is this
 # Worker's namespace. Cheap, and the alternative is discovering it from a public
 # post made under the wrong account.
-assert_kv_binding() {
-  local want configured listing actual
-  want="$(worker_name)-$KV_BINDING"
-  configured="$(node -e '
+configured_kv_id() {
+  node -e '
     const fs=require("fs");
     const m=fs.readFileSync(process.argv[1],"utf8").match(/"id"\s*:\s*"([^"]*)"/);
     process.stdout.write(m?m[1]:"");
-  ' "$WRANGLER_CONFIG")"
+  ' "$WRANGLER_CONFIG"
+}
+
+assert_kv_binding() {
+  local want configured listing actual
+  want="$(kv_title)"
+  configured="$(configured_kv_id)"
   [[ -n "$configured" ]] || die "no KV id in $WRANGLER_CONFIG — run: $0 provision"
 
   # Fetch once, so "the listing failed" and "the id isn't in the listing" stay
@@ -251,21 +260,44 @@ cmd_provision() {
   banner
   confirm "Create KV / D1 / Vectorize resources in ${ACCOUNT_LABEL}?"
 
-  info "KV namespace ($(worker_name)-$KV_BINDING)"
-  wr kv namespace create "$KV_BINDING" >/dev/null 2>&1 || true
-  local kv_id; kv_id="$(kv_id_for "$KV_BINDING")"
+  local title legacy; title="$(kv_title)"
+  info "KV namespace ($title)"
+  local kv_id; kv_id="$(kv_id_by_title "$title")"
+
+  if [[ -z "$kv_id" ]]; then
+    # A namespace titled with the bare binding predates qualified titles. Renaming
+    # beats creating alongside it, because it holds the cached session, the
+    # notification cursor and every handled: flag — a fresh namespace starts from
+    # nothing and re-answers mentions already answered.
+    #
+    # But only for the Worker that OWNS it. The unqualified title is exactly what
+    # made two bots collide, so in the other repo that same namespace belongs to
+    # the first bot, and renaming it there would steal its state instead of
+    # inheriting it. Ownership = this config already points at that id.
+    legacy="$(kv_id_by_title "$KV_BINDING")"
+    if [[ -n "$legacy" && "$(configured_kv_id)" == "$legacy" ]]; then
+      warn "'$KV_BINDING' ($legacy) is this Worker's namespace under the old unqualified name"
+      confirm "Rename it to '$title'? (keeps its data; a new namespace would lose the session and every dedupe flag)"
+      wr kv namespace rename --namespace-id "$legacy" --new-name "$title"
+      kv_id="$legacy"
+    else
+      [[ -n "$legacy" ]] && warn "leaving the namespace titled '$KV_BINDING' ($legacy) alone — it belongs to another Worker"
+      wr kv namespace create "$title" >/dev/null 2>&1 || true
+      kv_id="$(kv_id_by_title "$title")"
+    fi
+  fi
+
   if [[ -z "$kv_id" ]]; then
     # Show what the account actually has. "could not find it" with no listing
     # sent the last debugging session guessing at titles it could have printed.
     printf 'KV namespaces in this account:\n' >&2
     wr kv namespace list 2>/dev/null |
       node_json 'for (const n of o) console.error("  " + n.title + "  " + n.id);' || true
-    die "no KV namespace titled '$(worker_name)-$KV_BINDING'.
-  Wrangler titles them <worker-name>-<binding>. Create one with that exact title,
-  and do NOT point this Worker at a namespace listed above under another name — KV
-  holds the cached Bluesky session, so this bot would post under that bot's handle."
+    die "could not create or find a KV namespace titled '$title'.
+  Do NOT point this Worker at one of the namespaces above under a different title —
+  KV holds the cached Bluesky session, so this bot would post under that bot's handle."
   fi
-  echo "  $(worker_name)-$KV_BINDING -> $kv_id"
+  echo "  $title -> $kv_id"
   patch_config "id" "$kv_id"
 
   info "D1 database ($D1_NAME)"
