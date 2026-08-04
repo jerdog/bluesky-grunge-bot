@@ -182,6 +182,15 @@ Always run `npm test` and `npm run typecheck` before committing; both must pass.
 - **Runtime deps are precious.** The only production dependency is `@atproto/api`. Everything else is dev
   tooling (wrangler, vitest, types). Don't add runtime deps without a strong reason — Workers bundle size and
   cold-start matter, and more deps means more audit surface.
+- **The `undici` override in `package.json` is load-bearing — don't delete it as cruft.** `miniflare` (via
+  `wrangler`) pins `undici` to an *exact* version rather than a range, so when an advisory lands there is no
+  version Dependabot is allowed to bump to: it opens nothing and the alerts just pile up. That is exactly what
+  happened at `undici` 7.28.0 — one high and four medium alerts, zero PRs. `"overrides": { "undici": "^7.29.0" }`
+  is the only lever that moves it. The caret is deliberate, so future 7.x patches flow in instead of the pin
+  going stale. None of this reaches production: `undici` is dev-only (`"dev": true` in the lockfile), the Worker
+  uses workerd's built-in global `fetch`, and the vitest suite runs a plain `node` environment, so only
+  `npm run dev` ever loads it. Drop the override once miniflare itself pins `>=7.29.0` — and re-check
+  `npm ls undici` when you do.
 - **`DRY_RUN` is the one switch between logging and posting publicly, and it fails safe**: only the exact
   string `"false"` goes live, so a typo or a missing var keeps the bot quiet (pinned by a test in
   `env.test.ts`). It is currently `"false"` — see "This bot is live" above. Never make tests or examples

@@ -1,0 +1,39 @@
+version: 2
+
+# Security alerts were already on before this file existed; this adds *version*
+# updates on top of them, so routine bumps arrive as reviewable PRs instead of
+# quietly ageing until they turn into an advisory.
+#
+# Note what Dependabot cannot do here: it only proposes bumps that can actually
+# resolve. `miniflare` pins `undici` to an exact version, so when undici had an
+# advisory Dependabot had no legal version to move to and opened nothing at all
+# — five alerts, zero PRs. That is what the `overrides` block in package.json is
+# for. A quiet Dependabot is not proof of a healthy tree; check the alerts too.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # wrangler, vitest, typescript, and the types packages move constantly and
+      # none of them ship in the Worker. One combined PR per week is enough; CI
+      # (typecheck + tests + migrations) is the thing that judges them.
+      dev-dependencies:
+        dependency-type: development
+    # `@atproto/api` is deliberately left out of every group. It is the only
+    # production dependency — see AGENTS.md, "Runtime deps are precious" — so it
+    # gets its own PR and its own read, not a line in a batch of tooling bumps.
+    # It is currently declared as "latest", which means the installed version can
+    # drift without any PR at all; treat a bump PR here as a chance to pin it.
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # actions/checkout and actions/setup-node in ci.yml are pinned to major
+      # tags and nothing else was watching them.
+      github-actions:
+        patterns:
+          - "*"
