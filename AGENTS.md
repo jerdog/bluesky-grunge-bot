@@ -388,10 +388,18 @@ made without asking.
   D1 + a Bluesky write. `listMentions` pulls up to 50. A bounded pool (~4) would cut the wall clock a lot;
   it was left alone because Bluesky write rate limits, not CPU, are the real ceiling and exceeding them is
   worse than being slow.
-- **`PollStats` collapses every skip reason into one number.** `replyToPost` distinguishes `empty` /
-  `unsafe` / `no-match` and the manual route surfaces it, but the poller reports only scanned/answered — so
-  "40 scanned, 0 answered" doesn't say whether the corpus is unembedded or the safety filter is over-firing.
-  `runs.stats` is free-form JSON and could carry the histogram.
+- ~~**`PollStats` collapses every skip reason into one number.**~~ Fixed: `handleMentions` now returns
+  `skipped: { empty?, unsafe?, "no-match"? }` alongside `scanned`/`answered`, so a quiet run ("40 scanned, 0
+  answered") is distinguishable on the dashboard's **Recent runs** panel from the corpus going unembedded or
+  the safety filter over-firing.
+- **A `no-match` mention is left unmarked in KV, unlike `empty`/`unsafe`.** `empty`/`unsafe` are pure
+  functions of the post text — retrying changes nothing, so those are marked `handled` and never revisited.
+  `no-match` depends on the corpus/settings at that instant, which change over time, so it is deliberately
+  *not* marked: a later poll that re-lists the notification (or a manual `/api/reply-to` without `force`)
+  gets a genuine second attempt instead of a silent, permanent skip. The trade-off: a `no-match` mention that
+  scrolls out of `listNotifications`' window before the corpus improves is still lost for good — this only
+  helps when the notification resurfaces (an interrupted poll that didn't advance the cursor, or a human
+  retry), not a guaranteed retry on every miss.
 - **The safety denylist is hardcoded** in `replies.ts`, including a literal `"slur"` placeholder token that
   matches innocuous text. It is the one policy still in code rather than in `SPEC`/KV, and the one an
   operator would most plausibly need to change urgently.
