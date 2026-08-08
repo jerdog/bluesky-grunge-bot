@@ -74,7 +74,7 @@ describe("idle-poll cost", () => {
 
     const stats = await handleMentions(env);
 
-    expect(stats).toEqual({ scanned: 0, answered: 0 });
+    expect(stats).toEqual({ scanned: 0, answered: 0, skipped: {} });
     expect(writes).toEqual([]); // Bluesky returns a cursor every call; unchanged = no write
   });
 
@@ -85,6 +85,76 @@ describe("idle-poll cost", () => {
     await handleMentions(env);
 
     expect(writes).toEqual(["bsky:notif_cursor"]);
+  });
+});
+
+describe("skip handling in the poll loop", () => {
+  const mention = {
+    uri: "at://mention",
+    cid: "c",
+    reason: "mention" as const,
+    authorHandle: "someone.bsky.social",
+    authorDid: "did:plc:x",
+    text: "@bot.bsky.social what should I listen to?",
+    root: { uri: "at://mention", cid: "c" },
+    parent: { uri: "at://mention", cid: "c" },
+  };
+
+  function makeEnv(overrides: Partial<Record<string, unknown>> = {}) {
+    const puts: string[] = [];
+    return {
+      env: {
+        STATE: {
+          get: async () => null, // nothing handled yet
+          put: async (k: string) => {
+            puts.push(k);
+          },
+        },
+        DB: {
+          prepare: () => ({
+            bind() {
+              return this;
+            },
+            all: async () => ({ results: [] }),
+            first: async () => null,
+            run: async () => ({}),
+          }),
+        },
+        AI: { run: async () => ({ data: [[0.1]] }) },
+        LYRICS_INDEX: { query: async () => ({ matches: [] }) }, // no candidates -> no-match
+        BLUESKY_HANDLE: "bot.bsky.social",
+        MATCH_TOP_K: "25",
+        RERANK_TOP_N: "4",
+        SNIPPET_MAX_CHARS: "260",
+        PASSAGE_MAX_LINES: "8",
+        LINE_MAX_CHARS: "150",
+        ...overrides,
+      } as unknown as Env,
+      puts,
+    };
+  }
+
+  it("leaves a no-match mention unmarked, so it isn't skipped forever", async () => {
+    const { env, puts } = makeEnv();
+    vi.spyOn(bluesky, "listMentions").mockResolvedValue({ mentions: [mention], cursor: "CUR" });
+
+    const stats = await handleMentions(env);
+
+    expect(stats).toEqual({ scanned: 1, answered: 0, skipped: { "no-match": 1 } });
+    expect(puts.some((k) => k.startsWith("handled:"))).toBe(false);
+  });
+
+  it("marks an unsafe mention handled, since retrying the same text can't change the outcome", async () => {
+    const { env, puts } = makeEnv();
+    vi.spyOn(bluesky, "listMentions").mockResolvedValue({
+      mentions: [{ ...mention, text: "@bot.bsky.social kys" }],
+      cursor: "CUR",
+    });
+
+    const stats = await handleMentions(env);
+
+    expect(stats).toEqual({ scanned: 1, answered: 0, skipped: { unsafe: 1 } });
+    expect(puts.some((k) => k.startsWith("handled:"))).toBe(true);
   });
 });
 

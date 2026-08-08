@@ -109,7 +109,10 @@ curl -s -X POST "$URL/api/reply-to?key=$KEY" \
 The bot answers a given post once. Asking again returns
 `{"replied": false, "reason": "already-answered"}` rather than publishing a second
 reply — pass `"force": true` (or tick **reply again** in the panel) when a repeat is
-what you actually want.
+what you actually want. Exception: a post the poller skipped with `"reason":
+"no-match"` (no suitable lyric at the time) is never marked answered, so pasting it
+here — with no `force` needed — gives it a fresh attempt against the current corpus
+and settings.
 
 Replying to a post that is itself a reply threads under the original root, not
 under the post you pasted.

@@ -36,12 +36,15 @@ export function cleanPostText(text: string, handle: string): string {
 export interface PollStats {
   scanned: number;
   answered: number;
+  /** Why the rest weren't answered, so a quiet run is distinguishable from a broken one. */
+  skipped: Partial<Record<"empty" | "unsafe" | "no-match", number>>;
 }
 
 /**
  * Poll notifications and reply to new mentions/replies with a contextual lyric.
- * Idempotent: advances the KV cursor and records handled URIs so overlapping
- * cron runs never double-reply.
+ * Idempotent: advances the KV cursor and records handled URIs for every mention
+ * that reached a terminal outcome, so overlapping cron runs never double-reply.
+ * `no-match` is deliberately not terminal — see the loop below.
  */
 export async function handleMentions(env: Env): Promise<PollStats> {
   const cursor = await getNotifCursor(env);
@@ -61,6 +64,7 @@ export async function handleMentions(env: Env): Promise<PollStats> {
 
   let scanned = 0;
   let answered = 0;
+  const skipped: PollStats["skipped"] = {};
   const marks: Array<Promise<void>> = [];
 
   for (const [i, m] of mentions.entries()) {
@@ -70,10 +74,25 @@ export async function handleMentions(env: Env): Promise<PollStats> {
     const outcome = await replyToPost(env, m, settings, exclude, handle, {
       alreadyChecked: true, // the batched prefetch above already answered this
     });
-    if (outcome.replied) answered++;
-    // Nothing later in the loop depends on the mark landing; it is awaited before
-    // the cursor advances, which is what keeps the run idempotent.
-    marks.push(markHandled(env, m.uri));
+    if (outcome.replied) {
+      answered++;
+      // Nothing later in the loop depends on the mark landing; it is awaited
+      // before the cursor advances, which is what keeps the run idempotent.
+      marks.push(markHandled(env, m.uri));
+    } else if (outcome.reason === "no-match") {
+      // Not a verdict on the post, only on the corpus/settings at this instant —
+      // both change over time (new lines, retuned matchTopK, a downvote freeing
+      // up a line), so this one is deliberately left unmarked. A later poll that
+      // re-lists it (or a manual /api/reply-to) gets a real second attempt instead
+      // of a permanent, invisible skip.
+      skipped["no-match"] = (skipped["no-match"] ?? 0) + 1;
+    } else {
+      // `empty`/`unsafe` are pure functions of the post text — retrying the same
+      // text would fail the same way, so these are terminal.
+      skipped[outcome.reason as "empty" | "unsafe"] =
+        (skipped[outcome.reason as "empty" | "unsafe"] ?? 0) + 1;
+      marks.push(markHandled(env, m.uri));
+    }
   }
 
   await Promise.all(marks);
@@ -81,7 +100,7 @@ export async function handleMentions(env: Env): Promise<PollStats> {
   // unconditionally spent a KV write on every poll however quiet — the cost that
   // scales with cron frequency rather than with how much there is to do.
   if (next && next !== cursor) await setNotifCursor(env, next);
-  return { scanned, answered };
+  return { scanned, answered, skipped };
 }
 
 export interface ReplyOutcome {
